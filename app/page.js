@@ -5,11 +5,26 @@ import { useEffect, useRef, useState } from 'react';
 const COLOR = { 매매: '#16a34a', 월세: '#7c3aed', 전세: '#2563eb', 완료: '#9ca3af' };
 const colorOf = it => (it.status === '계약 완료' ? COLOR.완료 : COLOR[it.deal] || '#64748b');
 
+// 묶어서 보여줄 매물 종류
+const KIND_GROUPS = { '상가/사무실': ['상가', '사무실'] };
+
+function kindMatch(itemKind, filterKind) {
+  if (filterKind === 'all') return true;
+  const group = KIND_GROUPS[filterKind];
+  if (group) return group.includes(itemKind);
+  return itemKind === filterKind;
+}
+
+// 공백·하이픈 제거 (전화번호 검색용)
+const norm = s => String(s || '').toLowerCase().replace(/[\s-]/g, '');
+
 export default function Page() {
   const [data, setData] = useState(null);
   const [err, setErr] = useState(null);
   const [sel, setSel] = useState(null);
   const [f, setF] = useState({ deal: 'all', kind: 'all', done: false });
+  const [q, setQ] = useState('');
+
   const mapEl = useRef(null);
   const lmap = useRef(null);
   const layer = useRef(null);
@@ -43,28 +58,39 @@ export default function Page() {
     document.head.appendChild(s);
   }, [data]);
 
-  useEffect(() => { if (lmap.current) draw(); }, [f]);
+  useEffect(() => { if (lmap.current) draw(); }, [f, q]);
+
+  const matchQuery = it => {
+    const needle = q.trim().toLowerCase();
+    if (!needle) return true;
+    const hay = [
+      it.name, it.address, it.price, it.kind, it.deal, it.note,
+      it.area, it.floor, it.ownerName, it.lessorPhone, it.tenantPhone,
+    ].filter(Boolean).join(' ');
+    return hay.toLowerCase().includes(needle) || norm(hay).includes(norm(needle));
+  };
 
   const visible = it => {
     if (!it.geocoded) return false;
     if (f.deal !== 'all' && it.deal !== f.deal) return false;
-    if (f.kind !== 'all' && it.kind !== f.kind) return false;
+    if (!kindMatch(it.kind, f.kind)) return false;
     if (!f.done && it.status === '계약 완료') return false;
+    if (!matchQuery(it)) return false;
     return true;
   };
 
   function draw() {
     const L = window.L;
+    if (!L || !layer.current) return;
     layer.current.clearLayers();
     const pts = [];
     const seen = {};
 
     data.items.filter(visible).forEach(it => {
-      // 같은 좌표 겹침 방지: 미세하게 흩뿌림
       const k = `${it.lat.toFixed(5)},${it.lng.toFixed(5)}`;
       seen[k] = (seen[k] || 0) + 1;
       const n = seen[k] - 1;
-      const ang = (n * 2.4);
+      const ang = n * 2.4;
       const r = n === 0 ? 0 : 0.00012 * Math.sqrt(n);
       const lat = it.lat + r * Math.cos(ang);
       const lng = it.lng + r * Math.sin(ang);
@@ -102,12 +128,24 @@ export default function Page() {
   if (!data) return <div style={{ padding: 40, fontFamily: 'sans-serif' }}>매물 불러오는 중…</div>;
 
   const shown = data.items.filter(visible);
-  const kinds = [...new Set(data.items.map(i => i.kind).filter(Boolean))];
   const unmapped = data.items.filter(i => !i.geocoded);
+
+  // 상가·사무실은 하나로 묶어서 표시
+  const rawKinds = [...new Set(data.items.map(i => i.kind).filter(Boolean))];
+  const kinds = [];
+  let grouped = false;
+  rawKinds.forEach(k => {
+    if (k === '상가' || k === '사무실') {
+      if (!grouped) { kinds.push('상가/사무실'); grouped = true; }
+    } else {
+      kinds.push(k);
+    }
+  });
 
   return (
     <div style={{ display: 'flex', height: '100vh', fontFamily: "-apple-system,'Apple SD Gothic Neo','Malgun Gothic',sans-serif", color: '#1f2937' }}>
       <div style={{ width: 380, maxWidth: '42%', display: 'flex', flexDirection: 'column', borderRight: '1px solid #e5e7eb', background: '#fff' }}>
+
         <div style={{ padding: '14px 16px', borderBottom: '1px solid #e5e7eb' }}>
           <div style={{ fontSize: 16, fontWeight: 700, color: '#1b2a4a' }}>진솔공인중개사사무소</div>
           <div style={{ fontSize: 12, color: '#6b7280', marginTop: 2, lineHeight: 1.5 }}>
@@ -115,6 +153,29 @@ export default function Page() {
             경기도 김포시 사우동 관순로6 1층 · 010-2709-9781
           </div>
           {data.admin && <div style={{ fontSize: 11, color: '#b45309', marginTop: 4, fontWeight: 700 }}>내부용 모드 · 연락처 표시</div>}
+        </div>
+
+        {/* 검색 */}
+        <div style={{ padding: '10px 10px 0', background: '#f7f8fa' }}>
+          <div style={{ position: 'relative' }}>
+            <input
+              value={q}
+              onChange={e => setQ(e.target.value)}
+              placeholder={data.admin ? '매물명, 주소, 가격, 연락처 검색' : '매물명, 주소, 가격 검색'}
+              style={{
+                width: '100%', padding: '8px 30px 8px 10px', fontSize: 13,
+                border: '1px solid #e5e7eb', borderRadius: 8, background: '#fff',
+              }}
+            />
+            {q && (
+              <span onClick={() => setQ('')}
+                title="검색어 지우기"
+                style={{
+                  position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)',
+                  cursor: 'pointer', color: '#9ca3af', fontSize: 15, lineHeight: 1,
+                }}>×</span>
+            )}
+          </div>
         </div>
 
         <div style={{ padding: 10, borderBottom: '1px solid #e5e7eb', background: '#f7f8fa' }}>
@@ -128,10 +189,16 @@ export default function Page() {
 
         <div style={{ padding: '8px 16px', fontSize: 12, color: '#6b7280', borderBottom: '1px solid #e5e7eb' }}>
           표시 <b style={{ color: '#1b2a4a' }}>{shown.length}</b>건
+          {q.trim() && <span> · &ldquo;{q.trim()}&rdquo; 검색</span>}
           {unmapped.length > 0 && <span style={{ color: '#d97706' }}> · 좌표 없어 미표시 {unmapped.length}건</span>}
         </div>
 
         <div style={{ flex: 1, overflowY: 'auto' }}>
+          {shown.length === 0 && (
+            <div style={{ padding: '24px 16px', fontSize: 13, color: '#9ca3af', textAlign: 'center' }}>
+              조건에 맞는 매물이 없습니다.
+            </div>
+          )}
           {shown.map(it => (
             <div key={it.id} onClick={() => select(it)}
               style={{ padding: '12px 16px', borderBottom: '1px solid #e5e7eb', cursor: 'pointer', background: sel?.id === it.id ? '#eef2ff' : '#fff' }}>
