@@ -1,11 +1,3 @@
-
-5_page.js (덮어쓰기 - app 폴더)
-
-페이지
-1
-/
-1
-100%
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
@@ -408,4 +400,3 @@ function Row({ val, set, opts, m }) {
     </div>
   );
 }
-5_page.js (덮어쓰기 - app 폴더) 표시 중입니다.
